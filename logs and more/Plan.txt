@@ -1,0 +1,50 @@
+Run a 2 generation test
+Run 65 generations over night
+
+
+
+
+
+
+
+My weights:
+# --- Continuous Strategy Weight Profiles ---
+
+STRATEGY_SAFE = {
+    'off': 25, 'cap': -50, 'pos': 0.5, 
+    'util': 1.0, 'prime_pure': 3.5, 'flex_safety': 1.5, 'free': 3.0
+}
+
+STRATEGY_AGGRESSIVE = {
+    'off': 25, 'cap': -40, 'pos': 0.5, 
+    'util': 1.5, 'prime_pure': 5.0, 'flex_safety': 0.5, 'free': 0.5
+}
+
+STRATEGY_RACE = {
+    'off': 40, 'pip': -1.5, 'outside': -10, 'spread': 2
+}
+
+# --- Heuristic Tuning Constants ---
+
+WIN_SCORE = 10000.0 # Score for winning positions
+
+# Checker Utilization
+UTIL_PRIME_ZONE_WEIGHT = 2.0   # Points 4-8
+UTIL_MID_ZONE_WEIGHT = 1.0     # Points 9-18
+UTIL_DEAD_ZONE_WEIGHT = -0.5   # Points 1-3
+UTIL_STACK_PENALTY = -0.8      # Penalty per checker stacked beyond 2
+
+# Primes & Purity
+PRIME_EXPONENT = 1.5
+PRIME_BLOCKING_MULT = 2.0
+PRIME_NON_BLOCKING_MULT = 1.0
+PURITY_GAP_PENALTY = 1.5       # Penalty for gaps inside the prime zone
+
+# Flexibility & Safety
+FLEX_BASE_WEIGHT = 1.0
+FLEX_CLOSENESS_FACTOR = 0.5    # Multiplier for how closely packed occupied points are
+SAFETY_DIRECT_THREAT_PENALTY = 10   # Opponent is 1-6 spots away
+SAFETY_INDIRECT_THREAT_PENALTY = 1.0 # Opponent is 7-11 spots away
+SAFETY_SAFE_BLOT_PENALTY = 0.2       # Unprotected but not actively threatened
+
+# ----------------------------------
