@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 logs_and_more/
 /.vscode/
-/.build/
-/.dist/
-/.venv/
+build/
+dist/
+venv/
+*.spec
