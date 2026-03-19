@@ -138,3 +138,74 @@ def check_winner(state: GameState) -> Optional[int]:
 def select_move_randomly(state: GameState, dice: list[int]) -> Optional[GameState]:
     legal_moves = get_legal_moves(state, dice)
     return random.choice(legal_moves) if legal_moves else None
+
+def validate_single_move(state, from_idx, to_idx, available_dice):
+    player = state.current_turn
+    board = list(state.board)
+    
+    # 1. Verify piece exists
+    if board[from_idx] * player <= 0:
+        return False, board, available_dice, None
+        
+    distance = (to_idx - from_idx) * player
+    
+    # --- NEW: BEAR OFF LOGIC ---
+    # Player 1 bears off at index 25. Player -1 bears off at index 0.
+    is_bearing_off = (to_idx == 25 and player == 1) or (to_idx == 0 and player == -1)
+    
+    if is_bearing_off:
+        # Check if all pieces are safely in the home quadrant
+        if player == 1:
+            pieces_outside = sum(1 for i in range(0, 19) if board[i] > 0)
+        else:
+            pieces_outside = sum(1 for i in range(7, 26) if board[i] < 0)
+            
+        if pieces_outside > 0:
+            return False, board, available_dice, None # Cannot bear off yet!
+            
+        # Figure out which die to use
+        used_die = None
+        if distance in available_dice:
+            used_die = distance # Exact roll
+        else:
+            # Trying to use a larger die?
+            larger_dice = [d for d in available_dice if d > distance]
+            if larger_dice:
+                # You can only use a larger die if there are no pieces further back
+                if player == 1:
+                    further_back = sum(1 for i in range(19, from_idx) if board[i] > 0)
+                else:
+                    further_back = sum(1 for i in range(from_idx + 1, 7) if board[i] < 0)
+                    
+                if further_back == 0:
+                    used_die = min(larger_dice) # Use the smallest valid large die
+                    
+        if used_die is None:
+            return False, board, available_dice, None
+            
+        # Execute the bear off
+        board[from_idx] -= player
+        new_dice = list(available_dice)
+        new_dice.remove(used_die)
+        return True, board, new_dice, used_die
+
+    # --- NORMAL MOVE LOGIC ---
+    if distance not in available_dice:
+        return False, board, available_dice, None
+        
+    if board[to_idx] * player < -1:
+        return False, board, available_dice, None # Blocked by enemy
+        
+    board[from_idx] -= player
+    
+    if board[to_idx] * player == -1: # Hit
+        enemy = -player
+        bar_idx = 0 if enemy == 1 else 25 
+        board[bar_idx] += enemy
+        board[to_idx] = player
+    else: # Normal land
+        board[to_idx] += player
+        
+    new_dice = list(available_dice)
+    new_dice.remove(distance)
+    return True, board, new_dice, distance
