@@ -15,34 +15,29 @@ def init_game(starting_player: Optional[int] = None) -> GameState:
 
     return GameState(board=board, current_turn=starting_player)
 
-
 def roll_dice() -> list[int]:
     d1 = random.randint(1, 6)
     d2 = random.randint(1, 6)
     return [d1, d1, d1, d1] if d1 == d2 else [d1, d2]
 
-def can_bear_off(board: list[int], p: int) -> bool:
-    # Home board check + ensures no pieces are stuck on the bar
+def can_bear_off(board: list[int] | tuple, p: int) -> bool:
     if p == 1:
         return not any(board[i] > 0 for i in range(0, 19)) and board[25] <= 0
     else:
         return not any(board[i] < 0 for i in range(7, 26)) and board[0] >= 0
 
-
-def get_legal_moves(state: GameState, dice: list[int]) -> list[GameState]:
-    single_moves = get_single_moves(state, dice)
+# Signature updated to raw variables
+def get_legal_moves(board: list[int], current_turn: int, dice: list[int]) -> list[GameState]:
+    single_moves = get_single_moves(board, current_turn, dice)
     if not single_moves:
         return []
         
     all_combinations = get_move_combinations(single_moves)
     
-    # 1. Backgammon rule: Must play the maximum number of dice possible
     min_rem_len = min(len(rem) for _, rem in all_combinations)
     valid_combos = [(st, rem) for st, rem in all_combinations if len(rem) == min_rem_len]
     
-    # 2. Backgammon rule: If only one die can be played, you MUST play the higher number
     if min_rem_len > 0:
-        # The smaller the sum of remaining dice, the larger the die that was played
         min_rem_sum = min(sum(rem) for _, rem in valid_combos)
         valid_combos = [(st, rem) for st, rem in valid_combos if sum(rem) == min_rem_sum]
         
@@ -56,23 +51,23 @@ def get_legal_moves(state: GameState, dice: list[int]) -> list[GameState]:
             
     return best_moves
 
-def get_single_moves(state: GameState, dice: list[int]) -> list[tuple[GameState, list[int]]]:
+# Signature updated to raw variables
+def get_single_moves(board: list[int], current_turn: int, dice: list[int]) -> list[tuple[GameState, list[int]]]:
     moves_list = []
-    p = state.current_turn
+    p = current_turn
     bar_idx = 0 if p == 1 else 25
     
-    points_to_check = [bar_idx] if state.board[bar_idx] * p > 0 else range(1, 25)
-    bearing_off = can_bear_off(state.board, p)
+    points_to_check = [bar_idx] if board[bar_idx] * p > 0 else range(1, 25)
+    bearing_off = can_bear_off(board, p)
 
     for i in points_to_check:
-        if state.board[i] * p > 0:
+        if board[i] * p > 0:
             for die in set(dice):
                 target = i + (die * p)
                 
-                # 1. Normal Move
                 if 1 <= target <= 24:
-                    if state.board[target] * p >= -1:
-                        new_board = list(state.board)
+                    if board[target] * p >= -1:
+                        new_board = list(board)
                         new_board[i] -= p
                         
                         if new_board[target] * p == -1: 
@@ -86,20 +81,18 @@ def get_single_moves(state: GameState, dice: list[int]) -> list[tuple[GameState,
                         new_dice.remove(die)
                         moves_list.append((GameState(board=new_board, current_turn=p), new_dice))
                         
-                # 2. Bearing Off
                 elif bearing_off:
                     is_exact = (target == 25 if p == 1 else target == 0)
                     valid = is_exact
                     
                     if not valid:
-                        # Allow overshoot only if there are no pieces behind it
                         if p == 1 and target > 25:
-                            valid = not any(state.board[k] > 0 for k in range(19, i))
+                            valid = not any(board[k] > 0 for k in range(19, i))
                         elif p == -1 and target < 0:
-                            valid = not any(state.board[k] < 0 for k in range(i + 1, 7))
+                            valid = not any(board[k] < 0 for k in range(i + 1, 7))
                             
                     if valid:
-                        new_board = list(state.board)
+                        new_board = list(board)
                         new_board[i] -= p
                         off_idx = 26 if p == 1 else 27
                         new_board[off_idx] += p
@@ -116,7 +109,8 @@ def get_move_combinations(moves_list: list[tuple[GameState, list[int]]]) -> list
         if not remaining_dice:
             final_turns.append((state, []))
         else:
-            next_moves = get_single_moves(state, remaining_dice)
+            # Unpack the GameState here when diving into recursive searches
+            next_moves = get_single_moves(state.board, state.current_turn, remaining_dice)
             if not next_moves:
                 final_turns.append((state, remaining_dice))
             else:
@@ -124,86 +118,76 @@ def get_move_combinations(moves_list: list[tuple[GameState, list[int]]]) -> list
     return final_turns
 
 def apply_move(state: GameState, move: GameState) -> GameState:
-    # In this simplified version, we assume the move is already validated
     return GameState(board=move.board, current_turn=-state.current_turn)
 
-
 def check_winner(state: GameState) -> Optional[int]:
-    if state.board[26] == 15:  # Player 1 wins
+    if state.board[26] == 15:
         return 1
-    elif state.board[27] == -15:  # Player 2 wins
+    elif state.board[27] == -15:
         return -1
     return None
 
 def select_move_randomly(state: GameState, dice: list[int]) -> Optional[GameState]:
-    legal_moves = get_legal_moves(state, dice)
+    # Update to the new raw signature
+    legal_moves = get_legal_moves(state.board, state.current_turn, dice)
     return random.choice(legal_moves) if legal_moves else None
 
 def validate_single_move(state, from_idx, to_idx, available_dice):
     player = state.current_turn
     board = list(state.board)
     
-    # 1. Verify piece exists
     if board[from_idx] * player <= 0:
         return False, board, available_dice, None
         
     distance = (to_idx - from_idx) * player
     
-    # --- NEW: BEAR OFF LOGIC ---
-    # Player 1 bears off at index 25. Player -1 bears off at index 0.
     is_bearing_off = (to_idx == 25 and player == 1) or (to_idx == 0 and player == -1)
     
     if is_bearing_off:
-        # Check if all pieces are safely in the home quadrant
         if player == 1:
             pieces_outside = sum(1 for i in range(0, 19) if board[i] > 0)
         else:
             pieces_outside = sum(1 for i in range(7, 26) if board[i] < 0)
             
         if pieces_outside > 0:
-            return False, board, available_dice, None # Cannot bear off yet!
+            return False, board, available_dice, None 
             
-        # Figure out which die to use
         used_die = None
         if distance in available_dice:
-            used_die = distance # Exact roll
+            used_die = distance
         else:
-            # Trying to use a larger die?
             larger_dice = [d for d in available_dice if d > distance]
             if larger_dice:
-                # You can only use a larger die if there are no pieces further back
                 if player == 1:
                     further_back = sum(1 for i in range(19, from_idx) if board[i] > 0)
                 else:
                     further_back = sum(1 for i in range(from_idx + 1, 7) if board[i] < 0)
                     
                 if further_back == 0:
-                    used_die = min(larger_dice) # Use the smallest valid large die
+                    used_die = min(larger_dice) 
                     
         if used_die is None:
             return False, board, available_dice, None
             
-        # Execute the bear off
         board[from_idx] -= player
         new_dice = list(available_dice)
         new_dice.remove(used_die)
         return True, board, new_dice, used_die
 
-    # --- NORMAL MOVE LOGIC ---
     if distance not in available_dice:
         return False, board, available_dice, None
         
     if board[to_idx] * player < -1:
-        return False, board, available_dice, None # Blocked by enemy
+        return False, board, available_dice, None 
         
     board[from_idx] -= player
     
-    if board[to_idx] * player == -1: # Hit
+    if board[to_idx] * player == -1: 
         enemy = -player
         bar_idx = 0 if enemy == 1 else 25 
         board[bar_idx] += enemy
         board[to_idx] = player
-    else: # Normal land
+    else: 
         board[to_idx] += player
         
     new_dice = list(available_dice)

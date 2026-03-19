@@ -2,13 +2,14 @@ import random
 import time
 from models import GameState
 from actions import init_game, roll_dice, check_winner, get_legal_moves
-from heuristics import get_best_move
+# CHANGE 2: Import cached functions
+from heuristics import get_best_move, _evaluate_board_tuple, get_dynamic_weights 
 
 # --- GA Configuration ---
 POPULATION_SIZE = 20
 GENERATIONS = 70
-MUTATION_RATE = 0.15 # 15% chance for a gene to mutate
-MUTATION_AMOUNT = 1.2 # Wider mutation shifts for better exploration
+MUTATION_RATE = 0.15 
+MUTATION_AMOUNT = 1.2 
 
 # The Baseline "Smart" Agent (Your tuned heuristics)
 ADAM_DNA = (
@@ -32,43 +33,32 @@ GEN20_TOP_DNA_RUN1 = (
 
 GEN20_TOP_DNA_RUN2 = (
     15.978269080456549, -25.520338381615247, 8.641029126648656, 5.8538351497916965, 9.228359438396282, 6.80662375114478, 0.5357715925767024, 15.568089473911451, -33.83187208865223, 0, 4.260121606255912, 11.174981628320076, 0.9601883121395782, 10.012594750033731, 71.09434729365171, -10, -9.730693255272104, 7.403977340013146, 5.766193831016121, 2.388718724760736, -0.9391698928795473, 0, 3.7048234999413143, 9.737355650714154, 0.488696085231922, 1.9095186257245378, 2.2079088948357883, 1.697871011107156, 14.523311774446828, 1.553875646868323, 6.160501864356524
-    )
+)
 
 GEN39_TOP_DNA_RUN2 = (
     15.978269080456549, -40.57150388770723, 7.002577195236535, 5.060868679758681, 10.271284770564137, 6.374257428182323, 0, 15.35398169811127, -32.853997700459814, 1.3173760822678302, 0.8625728228345424, 11.364892039678438, 4.260274200365508, 7.5147892725066505, 71.73336734758155, -1.546951917212712, -5.34193812447907, 8.817512318374874, 6.53423901278557, 3.986264425468471, -0.9391698928795473, 0, 2.7285764289520364, 7.464286627718062, 2.3396906275312723, 1.9095186257245378, 2.925327818448932, 1.697871011107156, 14.523311774446828, 0.08563244559512295, 6.858517735117677
-    )
+)
 
 GEN40_TOP_DNA_RUN2 = (
     16.47501417153483, -40.57150388770723, 8.641029126648656, 5.060868679758681, 10.271284770564137, 7.632538975091173, 0, 15.35398169811127, -32.853997700459814, 1.3173760822678302, 0.8625728228345424, 11.364892039678438, 0, 7.5147892725066505, 71.20164615396267, -1.546951917212712, -5.34193812447907, 7.403977340013146, 5.821322777388142, 3.986264425468471, -0.493149774981672, -0.5784147040279, 2.8493249097478506, 7.464286627718062, 0.9257990501377829, 1.7490866192587027, 2.925327818448932, 1.7991061585144992, 15.682099967748258, 3.1359393011589645, 6.858517735117677
-    )
+)
 
-
-
-# Widened boundaries to allow the AI to discover radical strategies
 DNA_BOUNDS = [
-    # Safe Strategy (0-6)
     (0, 100), (-100, 0), (0, 10), (0, 10), (0, 20), (0, 10), (0, 15),
-    # Aggressive Strategy (7-13)
     (0, 100), (-100, 0), (0, 10), (0, 10), (0, 20), (0, 10), (0, 15),
-    # Race Strategy (14-17)
     (0, 100), (-10, 0), (-30, 0), (0, 20),
-    # Checker Util (18-21)
     (0, 10), (0, 10), (-5, 5), (-5, 0),
-    # Primes & Purity (22-25)
     (0.5, 5.0), (0.0, 10.0), (0.0, 5.0), (0.0, 10.0),
-    # Flex & Safety (26-30)
     (0, 10), (0.0, 5.0), (0, 50), (0, 20), (0, 10)
 ]
 
 def create_random_agent() -> tuple:
-    """Creates a 31-element tuple of random weights based on the widened bounds."""
     dna = []
     for bounds in DNA_BOUNDS:
         dna.append(random.uniform(bounds[0], bounds[1]))
     return tuple(dna)
 
 def crossover(parent1: tuple, parent2: tuple) -> tuple:
-    """Randomly inherits each gene from either parent 1 or parent 2."""
     child_dna = []
     for i in range(31):
         if random.random() > 0.5:
@@ -78,17 +68,18 @@ def crossover(parent1: tuple, parent2: tuple) -> tuple:
     return tuple(child_dna)
 
 def mutate(dna: tuple) -> tuple:
-    """Alters genes to introduce new traits, keeping them within valid bounds."""
     mutated_dna = list(dna)
     for i in range(31):
         if random.random() < MUTATION_RATE:
             mutated_dna[i] += random.uniform(-MUTATION_AMOUNT, MUTATION_AMOUNT)
-            # Clamp the mutated gene to ensure it doesn't break the logical bounds
             mutated_dna[i] = max(DNA_BOUNDS[i][0], min(DNA_BOUNDS[i][1], mutated_dna[i]))
     return tuple(mutated_dna)
 
 def play_headless_match(dna_1: tuple, dna_2: tuple) -> int:
-    """Plays a fast game with no prints. Returns 1 if dna_1 wins, -1 if dna_2 wins."""
+    # CHANGE 2: Clear cache between completely unique agents
+    _evaluate_board_tuple.cache_clear()
+    get_dynamic_weights.cache_clear()
+    
     state = init_game()
     
     while True:
@@ -97,13 +88,11 @@ def play_headless_match(dna_1: tuple, dna_2: tuple) -> int:
 
         dice = roll_dice()
         
-        # If no moves, swap turn immediately
         if not get_legal_moves(state, dice):
             state = GameState(board=state.board, current_turn=-state.current_turn)
             continue
             
         current_dna = dna_1 if state.current_turn == 1 else dna_2
-        # Using depth=1 so the background tournament runs incredibly fast
         best_move, _ = get_best_move(state, dice, weights=current_dna)
         
         state = GameState(board=best_move.board, current_turn=-state.current_turn)
@@ -111,56 +100,54 @@ def play_headless_match(dna_1: tuple, dna_2: tuple) -> int:
 def run_evolution():
     print("Initializing Primordial Soup...")
     
-    # Seed the population: the first 5 agents are the known good performers, the rest are random
     population = [ADAM_DNA, GEN20_TOP_DNA_RUN1, GEN20_TOP_DNA_RUN2, GEN39_TOP_DNA_RUN2, GEN40_TOP_DNA_RUN2] + [create_random_agent() for _ in range(POPULATION_SIZE - 5)]
     
-    # Clear or create the log file at the start of the run
+    # CHANGE 6: Open file once and wrap the loop
     with open("best_dna_log.txt", "w") as f:
         f.write("--- Backgammon GA Training Log ---\n")
-    
-    for gen in range(GENERATIONS):
-        start_time = time.time()
-        print(f"\n=== Starting Generation {gen + 1}/{GENERATIONS} ===")
-        scores = {i: 0 for i in range(POPULATION_SIZE)}
         
-        # Every agent plays exactly one match against a random opponent
-        for idx1 in range(0, POPULATION_SIZE, 2):
-            idx2 = idx1 + 1
-            agent1_dna = population[idx1]
-            agent2_dna = population[idx2]
+        for gen in range(GENERATIONS):
+            start_time = time.time()
+            print(f"\n=== Starting Generation {gen + 1}/{GENERATIONS} ===")
+            scores = {i: 0 for i in range(POPULATION_SIZE)}
             
-            winner = play_headless_match(agent1_dna, agent2_dna)
-            if winner == 1:
-                scores[idx1] += 1
-            else:
-                scores[idx2] += 1
+            # CHANGE 4: Shuffle the population before pairing so seeds fight others
+            random.shuffle(population)
+            
+            for idx1 in range(0, POPULATION_SIZE, 2):
+                idx2 = idx1 + 1
+                agent1_dna = population[idx1]
+                agent2_dna = population[idx2]
                 
-        # Rank the population
-        ranked_indices = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)
-        best_agent_idx = ranked_indices[0]
-        
-        # Keep the top 50%
-        survivors = [population[i] for i in ranked_indices[:POPULATION_SIZE // 2]]
-        
-        # Refill the bottom 50% with children
-        new_population = list(survivors)
-        while len(new_population) < POPULATION_SIZE:
-            parent1 = random.choice(survivors)
-            parent2 = random.choice(survivors)
-            child = crossover(parent1, parent2)
-            child = mutate(child)
-            new_population.append(child)
+                winner = play_headless_match(agent1_dna, agent2_dna)
+                if winner == 1:
+                    scores[idx1] += 1
+                else:
+                    scores[idx2] += 1
+                    
+            ranked_indices = sorted(scores.keys(), key=lambda i: scores[i], reverse=True)
+            best_agent_idx = ranked_indices[0]
             
-        population = new_population
-        
-        # Save the best DNA of this generation to the text file
-        best_dna = survivors[0]
-        gen_time = time.time() - start_time
-        print(f"Generation {gen + 1} complete in {gen_time:.1f} seconds. Top Score: {scores[best_agent_idx]} win(s)")
-        
-        with open("best_dna_log.txt", "a") as f:
+            survivors = [population[i] for i in ranked_indices[:POPULATION_SIZE // 2]]
+            
+            new_population = list(survivors)
+            while len(new_population) < POPULATION_SIZE:
+                parent1 = random.choice(survivors)
+                parent2 = random.choice(survivors)
+                child = crossover(parent1, parent2)
+                child = mutate(child)
+                new_population.append(child)
+                
+            population = new_population
+            
+            best_dna = survivors[0]
+            gen_time = time.time() - start_time
+            print(f"Generation {gen + 1} complete in {gen_time:.1f} seconds. Top Score: {scores[best_agent_idx]} win(s)")
+            
+            # CHANGE 6: Append directly to the already open file and flush to disk
             f.write(f"\nGeneration {gen + 1} Best DNA:\n")
             f.write(f"{best_dna}\n")
+            f.flush()
 
     print("\nEvolution Complete. Check 'best_dna_log.txt' for the results!")
 

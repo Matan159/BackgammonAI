@@ -12,31 +12,26 @@ def lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
 
 @lru_cache(maxsize=None)
-def get_dynamic_weights(player_pips: int, opp_pips: int, weights: tuple) -> dict:
+def get_dynamic_weights(player_pips: int, opp_pips: int, weights: tuple) -> tuple:
     diff = player_pips - opp_pips
     MAX_DIFF = 20.0
     clamped_diff = max(-MAX_DIFF, min(MAX_DIFF, float(diff)))
     t = (clamped_diff + MAX_DIFF) / (2 * MAX_DIFF)
     
-    # Map DNA: indices 0-6 are Safe, 7-13 are Aggressive
-    keys = ['off', 'cap', 'pos', 'util', 'prime_pure', 'flex_safety', 'free']
-    dynamic_weights = {}
-    for i, key in enumerate(keys):
-        dynamic_weights[key] = lerp(weights[i], weights[i+7], t)
-        
-    return dynamic_weights
+    return (
+        lerp(weights[0], weights[7], t),  # off
+        lerp(weights[1], weights[8], t),  # cap
+        lerp(weights[2], weights[9], t),  # pos
+        lerp(weights[3], weights[10], t), # util
+        lerp(weights[4], weights[11], t), # prime_pure
+        lerp(weights[5], weights[12], t), # flex_safety
+        lerp(weights[6], weights[13], t)  # free
+    )
 
-def get_captured(board: list[int], p: int) -> int: return abs(board[0 if p == 1 else 25])
-def get_beared_off(board: list[int], p: int) -> int: return abs(board[26 if p == 1 else 27])
+def get_captured(board: tuple, p: int) -> int: return abs(board[0 if p == 1 else 25])
+def get_beared_off(board: tuple, p: int) -> int: return abs(board[26 if p == 1 else 27])
 
-def get_position_score(board: list[int], p: int) -> float:
-    score = 0
-    for i in range(1, 25):
-        if board[i] * p > 0:
-            score += (i if p == 1 else (25 - i)) * abs(board[i])
-    return score
-
-def get_outside_checkers(board: list[int], p: int) -> int:
+def get_outside_checkers(board: tuple, p: int) -> int:
     count = 0
     if p == 1:
         for i in range(0, 19):
@@ -46,7 +41,7 @@ def get_outside_checkers(board: list[int], p: int) -> int:
             if board[i] < 0: count += abs(board[i])
     return count
 
-def get_home_spread(board: list[int], p: int) -> int:
+def get_home_spread(board: tuple, p: int) -> int:
     count = 0
     if p == 1:
         for i in range(19, 25):
@@ -56,8 +51,8 @@ def get_home_spread(board: list[int], p: int) -> int:
             if board[i] < 0: count += 1
     return count
 
-def get_contact_scores(board: list[int], player_turn: int, weights: tuple) -> tuple[float, float]:
-    # Extract weights from DNA
+def get_contact_scores(board: tuple, player_turn: int, weights: tuple) -> tuple[tuple, tuple]:
+     # Extract weights from DNA
     util_prime, util_mid, util_dead, util_stack = weights[18:22]
     prime_exp, prime_block, prime_non, pure_gap = weights[22:26]
     flex_base, flex_close, safe_dir, safe_indir, safe_blot = weights[26:31]
@@ -111,8 +106,9 @@ def get_contact_scores(board: list[int], player_turn: int, weights: tuple) -> tu
         prime_zone = [pt for pt in made_points[idx] if 3 <= pt <= 9]
         if len(prime_zone) >= 2:
             prime_zone.sort()
+            prime_zone_set = set(prime_zone) 
             for pt in range(prime_zone[0] + 1, prime_zone[-1]):
-                if pt not in prime_zone: pure_score[idx] -= pure_gap
+                if pt not in prime_zone_set: pure_score[idx] -= pure_gap
                     
         if occupied_points[idx]:
             span = max(occupied_points[idx]) - min(occupied_points[idx])
@@ -143,37 +139,62 @@ def get_contact_scores(board: list[int], player_turn: int, weights: tuple) -> tu
             elif is_indir: safety_penalty[idx] += safe_indir
             else: safety_penalty[idx] += safe_blot
             
-    p1_stats = {'pos': pos[0], 'util': util[0], 'prime_pure': prime_score[0] + pure_score[0], 'flex_safety': flex_score[0] - safety_penalty[0], 'free': free_score[0]}
-    p2_stats = {'pos': pos[1], 'util': util[1], 'prime_pure': prime_score[1] + pure_score[1], 'flex_safety': flex_score[1] - safety_penalty[1], 'free': free_score[1]}
+    # Return raw fast tuples instead of dictionaries
+    p1_stats = (pos[0], util[0], prime_score[0] + pure_score[0], flex_score[0] - safety_penalty[0], free_score[0])
+    p2_stats = (pos[1], util[1], prime_score[1] + pure_score[1], flex_score[1] - safety_penalty[1], free_score[1])
     return (p1_stats, p2_stats) if player_turn == 1 else (p2_stats, p1_stats)
 
 def evaluate_state(state: GameState, weights: tuple) -> float:
-    winner = check_winner(state)
-    if winner == state.current_turn: return WIN_SCORE
-    elif winner is not None: return -WIN_SCORE
+    # Inline the winner check to avoid jumping out to check_winner() millions of times
+    if state.board[26] == 15:
+        return WIN_SCORE if state.current_turn == 1 else -WIN_SCORE
+    elif state.board[27] == -15:
+        return WIN_SCORE if state.current_turn == -1 else -WIN_SCORE
+        
     return _evaluate_board_tuple(tuple(state.board), state.current_turn, weights)
     
-@lru_cache(maxsize=200000)
+@lru_cache(maxsize=None)
 def _evaluate_board_tuple(board_tuple: tuple, p: int, weights: tuple) -> float:
-    board = list(board_tuple) 
-    player_pips = get_pip_count(board, p)
-    opp_pips = get_pip_count(board, -p)
+    # No longer casting board_tuple to list() - passing it directly!
+    player_pips, opp_pips = get_both_pip_counts(board_tuple, p)
 
-    if is_pure_race(board):
+    if is_pure_race(board_tuple):
         r_off, r_pip, r_out, r_spread = weights[14:18]
-        p_score = (r_off * get_beared_off(board, p) + r_pip * player_pips + r_out * get_outside_checkers(board, p) + r_spread * get_home_spread(board, p)) 
-        o_score = (r_off * get_beared_off(board, -p) + r_pip * opp_pips + r_out * get_outside_checkers(board, -p) + r_spread * get_home_spread(board, -p))
+        p_score = (r_off * get_beared_off(board_tuple, p) + r_pip * player_pips + r_out * get_outside_checkers(board_tuple, p) + r_spread * get_home_spread(board_tuple, p)) 
+        o_score = (r_off * get_beared_off(board_tuple, -p) + r_pip * opp_pips + r_out * get_outside_checkers(board_tuple, -p) + r_spread * get_home_spread(board_tuple, -p))
         return p_score - o_score
     else:
-        p_stats, o_stats = get_contact_scores(board, p, weights)
-        w_p = get_dynamic_weights(player_pips, opp_pips, weights)
-        p_score = (w_p['off'] * get_beared_off(board, p) + w_p['cap'] * get_captured(board, p) + sum(w_p[k] * p_stats[k] for k in p_stats))
+        p_stats, o_stats = get_contact_scores(board_tuple, p, weights)
         
-        w_o = get_dynamic_weights(opp_pips, player_pips, weights) 
-        o_score = (w_o['off'] * get_beared_off(board, -p) + w_o['cap'] * get_captured(board, -p) + sum(w_o[k] * o_stats[k] for k in o_stats))
+        w_p_off, w_p_cap, w_p_pos, w_p_util, w_p_prime, w_p_flex, w_p_free = get_dynamic_weights(player_pips, opp_pips, weights)
+        p_pos, p_util, p_prime, p_flex, p_free = p_stats
+        
+        p_score = (
+            w_p_off * get_beared_off(board_tuple, p) + 
+            w_p_cap * get_captured(board_tuple, p) + 
+            w_p_pos * p_pos + 
+            w_p_util * p_util + 
+            w_p_prime * p_prime + 
+            w_p_flex * p_flex + 
+            w_p_free * p_free
+        )
+        
+        w_o_off, w_o_cap, w_o_pos, w_o_util, w_o_prime, w_o_flex, w_o_free = get_dynamic_weights(opp_pips, player_pips, weights)
+        o_pos, o_util, o_prime, o_flex, o_free = o_stats
+        
+        o_score = (
+            w_o_off * get_beared_off(board_tuple, -p) + 
+            w_o_cap * get_captured(board_tuple, -p) + 
+            w_o_pos * o_pos + 
+            w_o_util * o_util + 
+            w_o_prime * o_prime + 
+            w_o_flex * o_flex + 
+            w_o_free * o_free
+        )
+        
         return p_score - o_score
 
-def is_pure_race(board: list[int]) -> bool:
+def is_pure_race(board: tuple) -> bool:
     p1_min = 26
     for i in range(0, 25):
         if board[i] > 0:
@@ -186,24 +207,33 @@ def is_pure_race(board: list[int]) -> bool:
             break
     return p1_min > p2_max
 
-def get_pip_count(board: list[int], p: int) -> int:
-    total_pips = 0
-    if p == 1:
-        for i in range(0, 25):
-            if board[i] > 0: total_pips += board[i] * (25 - i)
-    else:
-        for i in range(1, 26):
-            if board[i] < 0: total_pips += abs(board[i]) * i
-    return total_pips
+def get_both_pip_counts(board: tuple, p: int) -> tuple[int, int]:
+    # Single fused loop array traversal for both players
+    p1_pips = 0
+    p2_pips = 0
+    for i in range(1, 25):
+        val = board[i]
+        if val > 0: p1_pips += val * (25 - i)
+        elif val < 0: p2_pips += (-val) * i
+        
+    if board[0] > 0: p1_pips += board[0] * 25
+    if board[25] < 0: p2_pips += (-board[25]) * 25
+    
+    return (p1_pips, p2_pips) if p == 1 else (p2_pips, p1_pips)
 
 def get_expected_value(move: GameState, weights: tuple) -> float:
-    opp_state = GameState(board=move.board, current_turn=-move.current_turn)
     expected_value = 0
+    base_eval = None 
+    opp_turn = -move.current_turn
     
     for roll, prob in DICE_PROBS:
-        opp_moves = get_legal_moves(opp_state, roll)
+        # Pass raw board and turn directly to skip GameState instantiation
+        opp_moves = get_legal_moves(move.board, opp_turn, roll)
+        
         if not opp_moves:
-            expected_value += prob * evaluate_state(move, weights)
+            if base_eval is None:
+                base_eval = evaluate_state(move, weights)
+            expected_value += prob * base_eval
             continue
         
         best_opp_score = float('-inf')
@@ -214,14 +244,9 @@ def get_expected_value(move: GameState, weights: tuple) -> float:
         
     return expected_value
 
-def get_best_move(state: GameState, dice: list[int], weights: tuple) -> tuple[GameState, list[tuple[float, GameState]]]:
-    possible_moves = get_legal_moves(state, dice)
-    if not possible_moves: return state, []
+def get_best_move(state: GameState, possible_moves: list[GameState], weights: tuple) -> tuple[GameState, list]:    
+    if not possible_moves: 
+        return state, []
         
-    evaluated_moves = []
-    for move in possible_moves:
-        ev = get_expected_value(move, weights)
-        evaluated_moves.append((ev, move))
-        
-    evaluated_moves.sort(key=lambda x: x[0], reverse=True)
-    return evaluated_moves[0][1], evaluated_moves
+    best_move = max(possible_moves, key=lambda move: get_expected_value(move, weights))
+    return best_move, []
