@@ -21,6 +21,8 @@ ADAM_DNA = (
     1.5, 2.0, 1.0, 1.5, 1.0, 0.5, 15.0, 1.0, 0.2
 )
 
+GEN150SWISS_DNA = (37.43753781382364, -47.765830142695386, 0.3747430920532817, 1.3382554236291975, 3.6133831731925743, 1.5319756954712047, 1.66156654842285, 40.95355108891252, -39.42628439543213, 0, 2.1394699179247234, 5.880416444147361, 0.7391095990249441, 0.29437310194315636, 39.64942923896567, -1.5599547313901485, -10.0, 1.791496701182991, 2.0, 0, -0.6087619474760084, -0.8049597225550622, 0.8000865077479294, 2.0, 1.4132407561394085, 0.3412313221860206, 0, 1.6314553496938662, 15.542179970828627, 1.0, 0)
+
 WINDOW_WIDTH = 1000
 WINDOW_HEIGHT = 700
 FPS = 60
@@ -115,7 +117,7 @@ def main():
                         input_handler.dragging_piece = None 
                         
                     safe_state = copy.deepcopy(game_state)
-                    human_can_end = not available_dice or not get_legal_moves(safe_state, list(available_dice))
+                    human_can_end = not available_dice or not get_legal_moves(safe_state.board, safe_state.current_turn, list(available_dice))
                     
                     if human_can_end and PLAY_BUTTON_RECT.collidepoint(mouse_pos):
                         game_state.current_turn = -1
@@ -156,13 +158,19 @@ def main():
                 game_state.current_turn = 1
                 is_first_turn = False
                 ui_state = "HUMAN_ROLL"
-            elif not get_legal_moves(game_state, list(available_dice)):
-                ui_state = "NO_MOVES"
-                anim_timer = 120
             else:
-                best_state, _ = get_best_move(game_state, list(available_dice), weights=ADAM_DNA)
-                game_state = best_state
-                available_dice = []
+                # 1. Calculate the legal moves exactly once
+                possible_moves = get_legal_moves(game_state.board, game_state.current_turn, list(available_dice))
+                
+                # 2. Check if Adam is blocked
+                if not possible_moves:
+                    ui_state = "NO_MOVES"
+                    anim_timer = 120
+                else:
+                    # 3. Pass the calculated moves into get_best_move (no longer takes dice directly!)
+                    best_state, _ = get_best_move(game_state, possible_moves, weights=ADAM_DNA)
+                    game_state = best_state
+                    available_dice = []
 
         elif ui_state == "NO_MOVES":
             visual_dice = available_dice 
@@ -200,7 +208,7 @@ def main():
                 elif ui_state == "PLAYING":
                     if game_state.current_turn == 1:
                         safe_state = copy.deepcopy(game_state)
-                        human_can_end = not available_dice or not get_legal_moves(safe_state, list(available_dice))
+                        human_can_end = not available_dice or not get_legal_moves(game_state.board, game_state.current_turn, list(available_dice))
                         
                         if not available_dice: status_msg = "Moves finished. Click 'Play' to end turn."
                         elif human_can_end: status_msg = "No legal moves remain! Click 'Play' to skip."
