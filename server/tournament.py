@@ -38,8 +38,11 @@ def play_tournament_match(adam_is_p1: bool) -> str:
 
         dice = roll_dice()
         
-        # Pass turn if no legal moves
-        if not get_legal_moves(state, dice):
+        # 1. Calculate the legal moves exactly ONCE using the new unpacked signature
+        possible_moves = get_legal_moves(state.board, state.current_turn, dice)
+        
+        # 2. Check the saved list to see if the turn is skipped
+        if not possible_moves:
             state = GameState(board=state.board, current_turn=-state.current_turn)
             continue
             
@@ -49,7 +52,8 @@ def play_tournament_match(adam_is_p1: bool) -> str:
         else:
             current_dna = GEN70_DNA if adam_is_p1 else ADAM_DNA
             
-        best_move, _ = get_best_move(state, dice, weights=current_dna)
+        # 3. Pass the already-calculated possible_moves into get_best_move
+        best_move, _ = get_best_move(state, possible_moves, weights=current_dna)
         state = GameState(board=best_move.board, current_turn=-state.current_turn)
 
 def run_tournament():
